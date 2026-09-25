@@ -19,4 +19,9 @@
     </PackageReference>
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\DigitalWallet.Domain\DigitalWallet.Domain.csproj" />
+    <ProjectReference Include="..\DigitalWallet.Application\DigitalWallet.Application.csproj" />
+  </ItemGroup>
+
 </Project>
