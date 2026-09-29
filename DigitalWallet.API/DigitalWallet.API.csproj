@@ -17,6 +17,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\DigitalWallet.Application\DigitalWallet.Application.csproj" />
+    <ProjectReference Include="..\DigitalWallet.Infrastructure\DigitalWallet.Infrastructure.csproj" />
   </ItemGroup>
 
 </Project>
