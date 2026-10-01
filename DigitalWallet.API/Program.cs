@@ -1,5 +1,5 @@
 using System.Text;
-using DigitalWallet.API.Middlewares;
+using DigitalWallet.API.Middleware;
 using DigitalWallet.Application;
 using DigitalWallet.Application.Settings;
 using DigitalWallet.Infrastructure;

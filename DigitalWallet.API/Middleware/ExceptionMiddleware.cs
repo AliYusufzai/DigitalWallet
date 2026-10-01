@@ -2,7 +2,7 @@ using System.Text.Json;
 using DigitalWallet.Common.Wrappers;
 using DigitalWallet.Domain.Exceptions;
 
-namespace DigitalWallet.API.Middlewares;
+namespace DigitalWallet.API.Middleware;
 
 public class ExceptionMiddleware
 {
