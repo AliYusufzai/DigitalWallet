@@ -92,7 +92,7 @@ public class AuthService : IAuthService
             throw new NotFoundException(nameof(User), dto.Email);
         }
 
-        bool passwordValid = BCrypt.Net.BCrypt.Verify(user.PasswordHash, dto.Password);
+        bool passwordValid = BCrypt.Net.BCrypt.Verify(dto.Password, user.PasswordHash);
         if (!passwordValid)
         {
             throw new WalletException("Invalid email or password");

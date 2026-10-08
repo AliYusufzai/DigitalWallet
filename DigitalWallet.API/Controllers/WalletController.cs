@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using DigitalWallet.Application.DTOs.Transaction;
 using DigitalWallet.Application.DTOs.Wallet;
 using DigitalWallet.Application.Interfaces.Services;
@@ -21,7 +22,7 @@ public class WalletController : ControllerBase
 
     private int GetUserId()
     {
-        string? userId = User.FindFirst("sub")?.Value;
+        string? userId = User.FindFirst("sub")?.Value ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
 
         if (string.IsNullOrEmpty(userId))
         {
