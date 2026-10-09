@@ -35,6 +35,20 @@ builder
 
 builder.Services.AddAuthorization();
 
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy(
+        "AllowFrontend",
+        policy =>
+        {
+            policy
+                .WithOrigins("http://localhost:3000", "http://localhost:8080")
+                .AllowAnyHeader()
+                .AllowAnyMethod();
+        }
+    );
+});
+
 // -----------------------------------------------
 // BUILD THE APP
 // -----------------------------------------------
@@ -45,20 +59,19 @@ var app = builder.Build();
 // -----------------------------------------------
 
 // global exception handler — must be first
-app.UseMiddleware<ExceptionMiddleware>();
 
 // if (app.Environment.IsDevelopment())
 // {
 //     app.UseSwagger();
 //     app.UseSwaggerUI();
 // }
-
+app.UseMiddleware<ExceptionMiddleware>();
+app.UseCors("AllowFrontend");
 app.UseHttpsRedirection();
 app.UseAuthentication();
 app.UseAuthorization();
-
-app.MapGet("/", () => Results.Ok(new { name = "Digital Wallet API", status = "running" }));
 app.MapControllers();
+app.MapGet("/", () => Results.Ok(new { name = "Digital Wallet API", status = "running" }));
 
 app.Lifetime.ApplicationStarted.Register(() =>
 {
