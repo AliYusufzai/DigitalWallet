@@ -1,3 +1,4 @@
+using DigitalWallet.Application.DTOs;
 using DigitalWallet.Application.DTOs.Transaction;
 using DigitalWallet.Application.Interfaces.Repositories;
 using DigitalWallet.Application.Interfaces.Services;
@@ -34,8 +35,7 @@ public class TransactionService : ITransactionService
 
     public async Task<PagedResult<TransactionResponseDto>> GetMyTransactionsAsync(
         int userId,
-        int page,
-        int pageSize
+        TransactionFilterDto filter
     )
     {
         Wallet? wallet = await _walletRepository.GetByUserIdAsync(userId);
@@ -46,18 +46,20 @@ public class TransactionService : ITransactionService
 
         List<Transaction> transactions = await _transactionRepository.GetByWalletIdAsync(
             wallet.Id,
-            page,
-            pageSize
+            filter
         );
 
-        int totalCount = await _transactionRepository.GetTotalCountByWalletIdAsync(wallet.Id);
+        int totalCount = await _transactionRepository.GetTotalCountByWalletIdAsync(
+            wallet.Id,
+            filter
+        );
 
         return new PagedResult<TransactionResponseDto>
         {
             Items = transactions.Select(MapToDto).ToList(),
             TotalCount = totalCount,
-            Page = page,
-            PageSize = pageSize,
+            Page = filter.Page,
+            PageSize = filter.PageSize,
         };
     }
 

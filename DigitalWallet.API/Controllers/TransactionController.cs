@@ -1,7 +1,9 @@
 using System.Security.Claims;
+using DigitalWallet.Application.DTOs;
 using DigitalWallet.Application.DTOs.Transaction;
 using DigitalWallet.Application.Interfaces.Services;
 using DigitalWallet.Common.Wrappers;
+using DigitalWallet.Domain.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -34,11 +36,26 @@ public class TransactionController : ControllerBase
     [HttpGet]
     public async Task<
         ActionResult<ApiResponse<PagedResult<TransactionResponseDto>>>
-    > GetMyTransactions([FromQuery] int page = 1, [FromQuery] int pageSize = 10)
+    > GetMyTransactions(
+        [FromQuery] TransactionType? type = null,
+        [FromQuery] DateTime? from = null,
+        [FromQuery] DateTime? to = null,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 10
+    )
     {
         int userId = GetUserId();
+        TransactionFilterDto filter = new TransactionFilterDto
+        {
+            Type = type,
+            From = from,
+            To = to,
+            Page = page,
+            PageSize = pageSize,
+        };
+
         PagedResult<TransactionResponseDto> result =
-            await _transactionService.GetMyTransactionsAsync(userId, page, pageSize);
+            await _transactionService.GetMyTransactionsAsync(userId, filter);
         return Ok(ApiResponse<PagedResult<TransactionResponseDto>>.Ok(result));
     }
 

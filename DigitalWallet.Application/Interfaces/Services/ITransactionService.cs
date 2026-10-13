@@ -1,3 +1,4 @@
+using DigitalWallet.Application.DTOs;
 using DigitalWallet.Application.DTOs.Transaction;
 using DigitalWallet.Common.Wrappers;
 
@@ -8,7 +9,6 @@ public interface ITransactionService
     Task<TransactionResponseDto?> GetByIdAsync(int id);
     Task<PagedResult<TransactionResponseDto>> GetMyTransactionsAsync(
         int userId,
-        int page,
-        int pageSize
+        TransactionFilterDto filter
     );
 }

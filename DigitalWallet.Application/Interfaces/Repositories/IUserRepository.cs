@@ -9,4 +9,5 @@ public interface IUserRepository
     Task<bool> ExistsByEmailAsync(string email);
     Task<User> CreateAsync(User user);
     Task<User> UpdateAsync(User user);
+    // Task<User> UpdateAsync(User user);
 }

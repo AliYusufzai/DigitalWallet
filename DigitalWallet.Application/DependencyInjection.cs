@@ -17,6 +17,7 @@ public static class DependencyInjection
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<IWalletService, WalletService>();
         services.AddScoped<ITransactionService, TransactionService>();
+        services.AddScoped<IUserService, UserService>();
 
         // register JWT settings
         services.Configure<JwtSettings>(configuration.GetSection("JwtSettings"));
