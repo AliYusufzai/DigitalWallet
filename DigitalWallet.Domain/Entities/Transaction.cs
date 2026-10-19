@@ -5,6 +5,9 @@ namespace DigitalWallet.Domain.Entities;
 public class Transaction
 {
     public int Id { get; set; }
+    public TransactionDirection Direction { get; set; }
+    public string? IdempotencyKey { get; set; }
+    public string? RequestHash { get; set; }
     public required string ReferenceNumber { get; set; }
     public decimal Amount { get; set; }
     public TransactionType Type { get; set; }

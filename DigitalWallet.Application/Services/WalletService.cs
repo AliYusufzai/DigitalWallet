@@ -12,14 +12,17 @@ public class WalletService : IWalletService
 {
     private readonly IWalletRepository _walletRepository;
     private readonly ITransactionRepository _transactionRepository;
+    private readonly IUnitOfWork _unitOfWork;
 
     public WalletService(
         IWalletRepository walletRepository,
-        ITransactionRepository transactionRepository
+        ITransactionRepository transactionRepository,
+        IUnitOfWork unitOfWork
     )
     {
         _walletRepository = walletRepository;
         _transactionRepository = transactionRepository;
+        _unitOfWork = unitOfWork;
     }
 
     public async Task<WalletResponseDto> CreateWalletAsync(int userId)
@@ -63,134 +66,111 @@ public class WalletService : IWalletService
         return MapToWalletDto(wallet);
     }
 
-    public async Task<TransactionResponseDto> DepositAsync(int userId, DepositDto dto)
+    public Task<TransactionResponseDto> DepositAsync(int userId, DepositDto dto) =>
+        ExecuteAsync(userId, dto.Amount, dto.Description, dto.IdempotencyKey, TransactionType.Deposit);
+
+    public Task<TransactionResponseDto> WithdrawAsync(int userId, WithdrawDto dto) =>
+        ExecuteAsync(userId, dto.Amount, dto.Description, dto.IdempotencyKey, TransactionType.Withdrawal);
+
+    public Task<TransactionResponseDto> TransferAsync(int userId, TransferDto dto) =>
+        ExecuteAsync(userId, dto.Amount, dto.Description, dto.IdempotencyKey,
+            TransactionType.Transfer, dto.ReceiverWalletNumber);
+
+    private async Task<TransactionResponseDto> ExecuteAsync(
+        int userId, decimal amount, string? description, string key,
+        TransactionType type, string? receiverNumber = null)
     {
-        // 1. get wallet
-        Wallet? wallet = await _walletRepository.GetByUserIdAsync(userId);
-        if (wallet == null)
+        if (amount < 1 || amount > 1_000_000 || decimal.Round(amount, 2) != amount)
+            throw new WalletException("Amount must be between 1 and 1,000,000 with at most two decimal places.");
+        if (string.IsNullOrWhiteSpace(key) || key.Length > 64)
+            throw new WalletException("An idempotency key of 1 to 64 characters is required.");
+        if (description?.Length > 200)
+            throw new WalletException("Description cannot exceed 200 characters.");
+        if (type == TransactionType.Transfer && string.IsNullOrWhiteSpace(receiverNumber))
+            throw new WalletException("Receiver wallet number is required.");
+
+        var wallet = await _walletRepository.GetByUserIdAsync(userId)
+            ?? throw new NotFoundException(nameof(Wallet), userId);
+        // Hash the original request, so reusing a key with different inputs is rejected.
+        string requestHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new
+            {
+                Type = type, Amount = amount.ToString("G29", System.Globalization.CultureInfo.InvariantCulture),
+                Description = description, Receiver = receiverNumber
+            })));
+        var existing = await _transactionRepository.GetByIdempotencyKeyAsync(wallet.Id, key);
+        if (existing != null)
         {
-            throw new NotFoundException(nameof(Wallet), userId);
-        }
-
-        // 2. check wallet is active
-        if (wallet.Status != WalletStatus.Active)
-        {
-            throw new WalletException("Wallet is not active");
-        }
-
-        // 3. add money to balance
-        wallet.Balance += dto.Amount;
-
-        // 4. update wallet in database
-        await _walletRepository.UpdateAsync(wallet);
-
-        // 5. create transaction record
-        Transaction transaction = new Transaction
-        {
-            ReferenceNumber = GenerateReferenceNumber(),
-            WalletId = wallet.Id,
-            Amount = dto.Amount,
-            Type = TransactionType.Deposit,
-            Status = TransactionStatus.Completed,
-            Description = dto.Description ?? "Deposit",
-        };
-
-        Transaction created = await _transactionRepository.CreateAsync(transaction);
-
-        // 6. return transaction response
-        return MapToTransactionDto(created);
-    }
-
-    public async Task<TransactionResponseDto> WithdrawAsync(int userId, WithdrawDto dto)
-    {
-        Wallet? wallet = await _walletRepository.GetByUserIdAsync(userId);
-        if (wallet == null)
-        {
-            throw new NotFoundException(nameof(Wallet), userId);
+            if (existing.RequestHash != requestHash)
+                throw new ConflictException("This idempotency key was already used for a different request.");
+            return MapToTransactionDto(existing, existing.ReceiverWallet?.WalletNumber);
         }
 
         if (wallet.Status != WalletStatus.Active)
+            throw new WalletException("Wallet is not active.");
+        Wallet? receiver = null;
+        if (type == TransactionType.Transfer)
         {
-            throw new WalletException("Wallet is not active");
+            receiver = await _walletRepository.GetByWalletNumberAsync(receiverNumber!)
+                ?? throw new NotFoundException(nameof(Wallet), receiverNumber!);
+            if (receiver.Id == wallet.Id)
+                throw new WalletException("Cannot transfer to your own wallet.");
+            if (receiver.Status != WalletStatus.Active)
+                throw new WalletException("Receiver wallet is not active.");
+            if (receiver.Currency != wallet.Currency)
+                throw new WalletException("Wallet currencies must match.");
         }
+        if (type != TransactionType.Deposit && amount > wallet.Balance)
+            throw new InsufficientFundsException(wallet.Balance, amount);
 
-        if (dto.Amount > wallet.Balance)
+        await _unitOfWork.BeginTransactionAsync();
+        try
         {
-            throw new InsufficientFundsException(wallet.Balance, dto.Amount);
+            wallet.Balance += type == TransactionType.Deposit ? amount : -amount;
+            await _walletRepository.UpdateAsync(wallet);
+            if (receiver != null)
+            {
+                receiver.Balance += amount;
+                await _walletRepository.UpdateAsync(receiver);
+            }
+            var transaction = new Transaction
+            {
+                ReferenceNumber = GenerateReferenceNumber(),
+                WalletId = wallet.Id,
+                ReceiverWalletId = receiver?.Id,
+                Amount = amount,
+                Type = type,
+                Direction = type == TransactionType.Deposit
+                    ? TransactionDirection.Incoming : TransactionDirection.Outgoing,
+                Status = TransactionStatus.Completed,
+                Description = description ?? (receiver != null
+                    ? $"Transfer to {receiver.WalletNumber}" : type.ToString()),
+                IdempotencyKey = key,
+                RequestHash = requestHash
+            };
+            await _transactionRepository.CreateAsync(transaction);
+            if (receiver != null)
+            {
+                await _transactionRepository.CreateAsync(new Transaction
+                {
+                    ReferenceNumber = transaction.ReferenceNumber,
+                    WalletId = receiver.Id,
+                    ReceiverWalletId = wallet.Id,
+                    Amount = amount,
+                    Type = TransactionType.Transfer,
+                    Direction = TransactionDirection.Incoming,
+                    Status = TransactionStatus.Completed,
+                    Description = $"Transfer from {wallet.WalletNumber}"
+                });
+            }
+            await _unitOfWork.CommitAsync();
+            return MapToTransactionDto(transaction, receiver?.WalletNumber);
         }
-
-        wallet.Balance -= dto.Amount;
-        await _walletRepository.UpdateAsync(wallet);
-
-        Transaction transaction = new Transaction
+        catch
         {
-            ReferenceNumber = GenerateReferenceNumber(),
-            WalletId = wallet.Id,
-            Amount = dto.Amount,
-            Type = TransactionType.Withdrawal,
-            Status = TransactionStatus.Completed,
-            Description = dto.Description ?? "Withdrawal",
-        };
-
-        Transaction created = await _transactionRepository.CreateAsync(transaction);
-        return MapToTransactionDto(created);
-    }
-
-    public async Task<TransactionResponseDto> TransferAsync(int userId, TransferDto dto)
-    {
-        Wallet? senderWallet = await _walletRepository.GetByUserIdAsync(userId);
-        if (senderWallet == null)
-        {
-            throw new NotFoundException(nameof(Wallet), userId);
+            await _unitOfWork.RollbackAsync();
+            throw;
         }
-
-        if (senderWallet.Status != WalletStatus.Active)
-        {
-            throw new WalletException("Your wallet is not active");
-        }
-
-        Wallet? receiverWallet = await _walletRepository.GetByWalletNumberAsync(
-            dto.ReceiverWalletNumber
-        );
-        if (receiverWallet == null)
-        {
-            throw new NotFoundException(nameof(Wallet), dto.ReceiverWalletNumber);
-        }
-
-        if (senderWallet.Id == receiverWallet.Id)
-        {
-            throw new WalletException("Cannot transfer to your own wallet");
-        }
-
-        if (receiverWallet.Status != WalletStatus.Active)
-        {
-            throw new WalletException("Receiver wallet is not active");
-        }
-
-        if (dto.Amount > senderWallet.Balance)
-        {
-            throw new InsufficientFundsException(senderWallet.Balance, dto.Amount);
-        }
-
-        senderWallet.Balance -= dto.Amount;
-        await _walletRepository.UpdateAsync(senderWallet);
-
-        receiverWallet.Balance += dto.Amount;
-        await _walletRepository.UpdateAsync(receiverWallet);
-
-        Transaction transaction = new Transaction
-        {
-            ReferenceNumber = GenerateReferenceNumber(),
-            WalletId = senderWallet.Id,
-            ReceiverWalletId = receiverWallet.Id,
-            Amount = dto.Amount,
-            Type = TransactionType.Transfer,
-            Status = TransactionStatus.Completed,
-            Description = dto.Description ?? $"Transfer to {dto.ReceiverWalletNumber}",
-        };
-
-        Transaction created = await _transactionRepository.CreateAsync(transaction);
-        return MapToTransactionDto(created, dto.ReceiverWalletNumber);
     }
 
     private static string GenerateWalletNumber()
@@ -200,7 +180,7 @@ public class WalletService : IWalletService
 
     private static string GenerateReferenceNumber()
     {
-        return $"TXN-{DateTime.UtcNow:yyyyMMddHHmmss}-{new Random().Next(1000, 9999)}";
+        return $"TXN-{Guid.NewGuid():N}";
     }
 
     private static WalletResponseDto MapToWalletDto(Wallet wallet)
@@ -224,6 +204,7 @@ public class WalletService : IWalletService
         return new TransactionResponseDto
         {
             Id = transaction.Id,
+            Direction = transaction.Direction.ToString(),
             ReferenceNumber = transaction.ReferenceNumber,
             Amount = transaction.Amount,
             Type = transaction.Type.ToString(),

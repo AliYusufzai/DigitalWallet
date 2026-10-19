@@ -63,7 +63,7 @@ public class TransactionController : ControllerBase
     [HttpGet("{id:int}")]
     public async Task<ActionResult<ApiResponse<TransactionResponseDto>>> GetById(int id)
     {
-        TransactionResponseDto? result = await _transactionService.GetByIdAsync(id);
+        TransactionResponseDto? result = await _transactionService.GetByIdAsync(id, GetUserId());
 
         if (result == null)
             return NotFound(

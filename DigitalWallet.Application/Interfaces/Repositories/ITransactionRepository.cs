@@ -5,8 +5,9 @@ namespace DigitalWallet.Application.Interfaces.Repositories;
 
 public interface ITransactionRepository
 {
-    Task<Transaction?> GetByIdAsync(int id);
-    Task<Transaction?> GetByReferenceNumberAsync(string referenceNumber);
+    Task<Transaction?> GetByIdAsync(int id, int userId);
+    Task<Transaction?> GetByReferenceNumberAsync(string referenceNumber, int userId);
+    Task<Transaction?> GetByIdempotencyKeyAsync(int walletId, string key);
     Task<List<Transaction>> GetByWalletIdAsync(int walletId, TransactionFilterDto filter);
     Task<int> GetTotalCountByWalletIdAsync(int walletId, TransactionFilterDto filter);
     Task<Transaction> CreateAsync(Transaction transaction);

@@ -12,6 +12,11 @@ public class TransactionConfiguration : IEntityTypeConfiguration<Transaction>
         builder.ToTable("Transactions");
 
         builder.HasKey(t => t.Id);
+        builder.Property(t => t.Direction).HasConversion<string>().HasMaxLength(20);
+        builder.Property(t => t.IdempotencyKey).HasMaxLength(64);
+        builder.Property(t => t.RequestHash).HasMaxLength(64);
+        builder.HasIndex(t => new { t.WalletId, t.IdempotencyKey })
+            .IsUnique().HasFilter("[IdempotencyKey] IS NOT NULL");
 
         builder.Property(t => t.ReferenceNumber).IsRequired().HasMaxLength(50);
 
@@ -25,7 +30,7 @@ public class TransactionConfiguration : IEntityTypeConfiguration<Transaction>
 
         builder.Property(t => t.CreatedAt).HasDefaultValueSql("GETUTCDATE()");
 
-        builder.HasIndex(t => t.ReferenceNumber).IsUnique();
+        builder.HasIndex(t => new { t.ReferenceNumber, t.WalletId }).IsUnique();
 
         builder.HasIndex(t => t.WalletId);
         builder.HasIndex(t => t.CreatedAt);

@@ -6,7 +6,7 @@ namespace DigitalWallet.Application.Interfaces.Services;
 
 public interface ITransactionService
 {
-    Task<TransactionResponseDto?> GetByIdAsync(int id);
+    Task<TransactionResponseDto?> GetByIdAsync(int id, int userId);
     Task<PagedResult<TransactionResponseDto>> GetMyTransactionsAsync(
         int userId,
         TransactionFilterDto filter

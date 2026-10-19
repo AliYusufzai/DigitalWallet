@@ -12,6 +12,7 @@ public class WalletConfiguration : IEntityTypeConfiguration<Wallet>
         builder.ToTable("Wallets");
 
         builder.HasKey(u => u.Id);
+        builder.Property(w => w.RowVersion).IsRowVersion();
 
         builder.Property(u => u.WalletNumber).IsRequired().HasMaxLength(30);
 

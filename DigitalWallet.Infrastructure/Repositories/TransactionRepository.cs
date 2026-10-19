@@ -15,17 +15,17 @@ public class TransactionRepository : ITransactionRepository
         _context = context;
     }
 
-    public async Task<Transaction?> GetByIdAsync(int id)
-    {
-        return await _context
-            .Transactions.Include(t => t.Wallet)
-            .FirstOrDefaultAsync(t => t.Id == id);
-    }
-
-    public async Task<Transaction?> GetByReferenceNumberAsync(string referenceNumber)
+    public async Task<Transaction?> GetByIdAsync(int id, int userId)
     {
         return await _context.Transactions.FirstOrDefaultAsync(t =>
-            t.ReferenceNumber == referenceNumber
+            t.Id == id && t.Wallet != null && t.Wallet.UserId == userId
+        );
+    }
+
+    public async Task<Transaction?> GetByReferenceNumberAsync(string referenceNumber, int userId)
+    {
+        return await _context.Transactions.FirstOrDefaultAsync(t =>
+            t.ReferenceNumber == referenceNumber && t.Wallet != null && t.Wallet.UserId == userId
         );
     }
 
@@ -34,7 +34,7 @@ public class TransactionRepository : ITransactionRepository
         TransactionFilterDto filter
     )
     {
-        IQueryable<Transaction> query = _context.Transactions.Where(t => t.Id == walletId);
+        IQueryable<Transaction> query = _context.Transactions.Where(t => t.WalletId == walletId);
 
         if (filter.Type.HasValue)
         {
@@ -59,7 +59,7 @@ public class TransactionRepository : ITransactionRepository
 
     public async Task<int> GetTotalCountByWalletIdAsync(int walletId, TransactionFilterDto filter)
     {
-        IQueryable<Transaction> query = _context.Transactions.Where(t => t.Id == walletId);
+        IQueryable<Transaction> query = _context.Transactions.Where(t => t.WalletId == walletId);
 
         if (filter.Type.HasValue)
             query = query.Where(t => t.Type == filter.Type.Value);
@@ -71,6 +71,12 @@ public class TransactionRepository : ITransactionRepository
             query = query.Where(t => t.CreatedAt <= filter.To.Value.AddDays(1));
 
         return await query.CountAsync();
+    }
+
+    public Task<Transaction?> GetByIdempotencyKeyAsync(int walletId, string key)
+    {
+        return _context.Transactions.Include(t => t.ReceiverWallet)
+            .FirstOrDefaultAsync(t => t.WalletId == walletId && t.IdempotencyKey == key);
     }
 
     public async Task<Transaction> CreateAsync(Transaction transaction)

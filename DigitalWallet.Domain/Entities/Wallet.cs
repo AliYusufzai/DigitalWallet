@@ -5,6 +5,7 @@ namespace DigitalWallet.Domain.Entities;
 public class Wallet
 {
     public int Id { get; set; }
+    public byte[] RowVersion { get; set; } = [];
     public required string WalletNumber { get; set; }
     public decimal Balance { get; set; } = 0;
     public string Currency { get; set; } = "PKR";

@@ -22,6 +22,40 @@ namespace DigitalWallet.Infrastructure.Migrations
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
 
+            modelBuilder.Entity("DigitalWallet.Domain.Entities.Beneficiary", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2")
+                        .HasDefaultValueSql("GETUTCDATE()");
+
+                    b.Property<string>("Nickname")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("WalletNumber")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId", "WalletNumber")
+                        .IsUnique();
+
+                    b.ToTable("Beneficiaries", (string)null);
+                });
+
             modelBuilder.Entity("DigitalWallet.Domain.Entities.Transaction", b =>
                 {
                     b.Property<int>("Id")
@@ -42,6 +76,15 @@ namespace DigitalWallet.Infrastructure.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
+                    b.Property<string>("Direction")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<string>("IdempotencyKey")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
                     b.Property<int?>("ReceiverWalletId")
                         .HasColumnType("int");
 
@@ -49,6 +92,10 @@ namespace DigitalWallet.Infrastructure.Migrations
                         .IsRequired()
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("RequestHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -69,10 +116,14 @@ namespace DigitalWallet.Infrastructure.Migrations
 
                     b.HasIndex("ReceiverWalletId");
 
-                    b.HasIndex("ReferenceNumber")
+                    b.HasIndex("WalletId");
+
+                    b.HasIndex("ReferenceNumber", "WalletId")
                         .IsUnique();
 
-                    b.HasIndex("WalletId");
+                    b.HasIndex("WalletId", "IdempotencyKey")
+                        .IsUnique()
+                        .HasFilter("[IdempotencyKey] IS NOT NULL");
 
                     b.ToTable("Transactions", (string)null);
                 });
@@ -147,6 +198,12 @@ namespace DigitalWallet.Infrastructure.Migrations
                         .HasColumnType("nvarchar(3)")
                         .HasDefaultValue("PKR");
 
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
@@ -171,6 +228,17 @@ namespace DigitalWallet.Infrastructure.Migrations
                         .IsUnique();
 
                     b.ToTable("Wallets", (string)null);
+                });
+
+            modelBuilder.Entity("DigitalWallet.Domain.Entities.Beneficiary", b =>
+                {
+                    b.HasOne("DigitalWallet.Domain.Entities.User", "User")
+                        .WithMany("Beneficiaries")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("DigitalWallet.Domain.Entities.Transaction", b =>
@@ -204,6 +272,8 @@ namespace DigitalWallet.Infrastructure.Migrations
 
             modelBuilder.Entity("DigitalWallet.Domain.Entities.User", b =>
                 {
+                    b.Navigation("Beneficiaries");
+
                     b.Navigation("Wallet");
                 });
 

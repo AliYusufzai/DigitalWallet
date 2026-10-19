@@ -22,9 +22,9 @@ public class TransactionService : ITransactionService
         _walletRepository = walletRepository;
     }
 
-    public async Task<TransactionResponseDto?> GetByIdAsync(int id)
+    public async Task<TransactionResponseDto?> GetByIdAsync(int id, int userId)
     {
-        Transaction? transaction = await _transactionRepository.GetByIdAsync(id);
+        Transaction? transaction = await _transactionRepository.GetByIdAsync(id, userId);
         if (transaction == null)
         {
             throw new NotFoundException(nameof(Transaction), id);
@@ -68,6 +68,7 @@ public class TransactionService : ITransactionService
         return new TransactionResponseDto
         {
             Id = transaction.Id,
+            Direction = transaction.Direction.ToString(),
             ReferenceNumber = transaction.ReferenceNumber,
             Amount = transaction.Amount,
             Type = transaction.Type.ToString(),

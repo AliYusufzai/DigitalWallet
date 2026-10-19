@@ -11,4 +11,5 @@ public class User
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     public Wallet? Wallet { get; set; } // nullable — EF Core sets this
+    public List<Beneficiary> Beneficiaries {get; set;} = new();
 }

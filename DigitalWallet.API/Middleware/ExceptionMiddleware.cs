@@ -21,6 +21,18 @@ public class ExceptionMiddleware
         {
             await _next(context);
         }
+        catch (Exception ex) when (ex is ConflictException
+            || ex is Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException
+            || ex is Microsoft.EntityFrameworkCore.DbUpdateException
+            { InnerException: Microsoft.Data.SqlClient.SqlException { Number: 2601 or 2627 } })
+        {
+            context.Response.StatusCode = 409;
+            context.Response.ContentType = "application/json";
+            string message = ex is ConflictException ? ex.Message
+                : "The operation conflicted with another request. Retry with the same idempotency key.";
+            await context.Response.WriteAsync(
+                JsonSerializer.Serialize(ApiResponse<object>.Fail(message)));
+        }
         catch (NotFoundException ex)
         {
             _logger.LogWarning(ex.Message);

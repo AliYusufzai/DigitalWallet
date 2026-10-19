@@ -1,6 +1,8 @@
 # Digital Wallet API
 
-A production-ready Digital Wallet REST API built with **ASP.NET Core 10**, **Entity Framework Core**, and **SQL Server**. Supports user authentication, wallet management, deposits, withdrawals, and wallet-to-wallet transfers.
+A Digital Wallet REST API learning project built with **ASP.NET Core 10**, **Entity Framework Core**, and **SQL Server**. Supports authentication, profile management, wallet operations, filtered transaction history, and saved beneficiaries.
+
+See [frontend.md](./frontend.md) for request examples, retry handling, and frontend integration.
 
 ---
 
@@ -13,7 +15,7 @@ A production-ready Digital Wallet REST API built with **ASP.NET Core 10**, **Ent
 | ORM              | Entity Framework Core   |
 | Authentication   | JWT Bearer Tokens       |
 | Password Hashing | BCrypt.Net              |
-| Documentation    | Swagger / OpenAPI       |
+| API reference    | README and frontend guide (Swagger disabled) |
 
 ---
 
@@ -42,12 +44,16 @@ Common ← used by all layers
 
 ## Features
 
+- Profile updates and password changes
+- Saved beneficiaries (list, add, delete)
+- Atomic money operations, idempotency, and wallet concurrency checks
+
 - ✅ User registration and login with JWT authentication
 - ✅ One wallet per user with unique wallet number
 - ✅ Deposit money into wallet
 - ✅ Withdraw money from wallet
 - ✅ Transfer money between wallets
-- ✅ Transaction history with pagination
+- ✅ Transaction history with type/date filters and pagination
 - ✅ Global exception handling middleware
 - ✅ Standardized API response wrapper
 - ✅ Input validation with Data Annotations
@@ -106,10 +112,6 @@ Update `appsettings.json` in `DigitalWallet.API`:
 ### 4. Run Migrations
 
 ```bash
-dotnet ef migrations add InitialCreate \
-  --project DigitalWallet.Infrastructure \
-  --startup-project DigitalWallet.API
-
 dotnet ef database update \
   --project DigitalWallet.Infrastructure \
   --startup-project DigitalWallet.API
@@ -123,11 +125,13 @@ dotnet ef database update \
 dotnet watch --project DigitalWallet.API
 ```
 
-Open Swagger UI at:
+The API currently binds to `https://localhost:7123` and `http://localhost:5123`
+with HTTPS redirection enabled. Trust the local certificate using
+`dotnet dev-certs https --trust` if needed. Swagger middleware is currently
+commented out; `/swagger` is not enabled.
 
-```
-https://localhost:{port}/swagger
-```
+Browser CORS currently allows `http://localhost:3000` and
+`http://localhost:8080`. Other frontend origins need a backend CORS change.
 
 ---
 
@@ -156,6 +160,99 @@ https://localhost:{port}/swagger
 | ------ | ------------------------ | ----------------------------------- | ------------- |
 | GET    | `/api/transactions`      | Get transaction history (paginated) | Yes           |
 | GET    | `/api/transactions/{id}` | Get single transaction              | Yes           |
+
+### Profile and password
+
+All endpoints use the authenticated user's identity from the JWT; do not send a user ID.
+
+| Method | Endpoint | Description |
+| --- | --- | --- |
+| GET | `/api/user/profile` | Read your profile |
+| PUT | `/api/user/profile` | Replace full name and phone number; email is not editable here |
+| PUT | `/api/user/password` | Change password after verifying the current password |
+
+Profile update body:
+
+```json
+{
+  "fullName": "Ali Raza",
+  "phoneNumber": "03001234567"
+}
+```
+
+Both fields are required. Full name must be 3-100 characters; phone number must
+pass the DTO's phone validation. GET and PUT return profile data containing
+`id`, `fullName`, `email`, `phoneNumber`, `isActive`, and `createdAt`.
+
+Password change body:
+
+```json
+{
+  "currentPassword": "OldPassword123!",
+  "newPassword": "NewPassword456!",
+  "confirmPassword": "NewPassword456!"
+}
+```
+
+All fields are required. New password must be 6-100 characters, match confirmation,
+and differ from the current password. Success is HTTP 200 with a message and
+null data. This endpoint does not issue a replacement JWT or revoke existing JWTs.
+
+### Beneficiaries
+
+A beneficiary is a saved recipient wallet. All endpoints require a bearer token.
+
+| Method | Endpoint | Description |
+| --- | --- | --- |
+| GET | `/api/beneficiaries` | List your saved recipients (not paginated) |
+| POST | `/api/beneficiaries` | Save an existing wallet with a nickname |
+| DELETE | `/api/beneficiaries/{id}` | Delete your saved recipient using its beneficiary ID |
+
+Add body:
+
+```json
+{
+  "nickname": "Ali",
+  "walletNumber": "W-47392810"
+}
+```
+
+Nickname is required and at most 50 characters. Wallet number is required and
+must exist. Saving your own wallet or saving the same wallet twice is rejected.
+Each returned item has `id`, `nickname`, `walletNumber`, and `createdAt`.
+Add and delete return HTTP 200; delete returns a message with null data.
+Deleting another user's beneficiary currently returns 400; a missing ID returns 404.
+
+To pay a beneficiary, pass its `walletNumber` as `receiverWalletNumber` to
+`POST /api/wallet/transfer`. Saving or deleting a beneficiary never moves money.
+There is no beneficiary-edit or separate beneficiary-payment endpoint.
+
+### Transaction filters
+
+`GET /api/transactions?type=Transfer&from=2026-10-01&to=2026-10-19&page=1&pageSize=10`
+
+| Query parameter | Default | Meaning |
+| --- | --- | --- |
+| `type` | All types | `Deposit`, `Withdrawal`, or `Transfer` (also numeric 0, 1, 2) |
+| `from` | No lower bound | Include records with `CreatedAt >= from` |
+| `to` | No upper bound | Current implementation uses `CreatedAt <= to + 1 day` |
+| `page` | 1 | One-based page number |
+| `pageSize` | 10 | Number of entries per page |
+
+Prefer date-only values (`YYYY-MM-DD`) for the date picker. The current inclusive
+upper bound also includes exactly midnight on the following day. It adds a day
+even if a time is supplied. Stored timestamps are UTC; the endpoint does not
+convert a user's local calendar dates into UTC boundaries.
+
+Results are newest first and scoped to your wallet. Send positive page and
+pageSize values; the endpoint currently does not validate their bounds or cap
+pageSize. There is no server-side direction or reference-number filter.
+
+Each transaction includes `id`, `referenceNumber`, `amount`, `type`, `direction`,
+`status`, `description`, `receiverWalletNumber`, and `createdAt`.
+History/detail mapping currently leaves `receiverWalletNumber` null.
+The detail endpoint accepts the entry ID, not the shared reference, and returns
+404 for entries not owned by your wallet.
 
 ---
 
@@ -206,7 +303,8 @@ POST /api/wallet/deposit
 Authorization: Bearer eyJhbGci...
 {
   "amount": 5000,
-  "description": "Salary"
+  "description": "Salary",
+  "idempotencyKey": "deposit-20261019-001"
 }
 ```
 
@@ -218,7 +316,8 @@ Authorization: Bearer eyJhbGci...
 {
   "receiverWalletNumber": "W-47392810",
   "amount": 1000,
-  "description": "Rent payment"
+  "description": "Rent payment",
+  "idempotencyKey": "transfer-20261019-001"
 }
 ```
 
@@ -236,12 +335,12 @@ Response:
   "success": true,
   "message": "Success",
   "data": {
-    "items": [...],
-    "totalCount": 25,
+    "items": [],
+    "totalCount": 0,
     "page": 1,
     "pageSize": 10,
-    "totalPages": 3,
-    "hasNext": true,
+    "totalPages": 0,
+    "hasNext": false,
     "hasPrevious": false
   }
 }
@@ -251,7 +350,7 @@ Response:
 
 ## Standard API Response
 
-Every response follows this consistent shape:
+Controller success responses use this shape (camelCase JSON):
 
 ```json
 {
@@ -262,16 +361,21 @@ Every response follows this consistent shape:
 }
 ```
 
-On failure:
+Middleware failures currently use PascalCase because they are serialized
+directly with `JsonSerializer.Serialize`:
 
 ```json
 {
-    "success": false,
-    "message": "Insufficient funds",
-    "data": null,
-    "errors": ["Insufficient funds. Available: 500, Attempted: 1000"]
+  "Success": false,
+  "Message": "Current password is incorrect",
+  "Data": null,
+  "Errors": ["Current password is incorrect"]
 }
 ```
+
+Automatic DTO validation failures use ASP.NET Problem Details, with an `errors`
+object keyed by field name. Authentication failures can have an empty body.
+See [frontend error handling](./frontend.md#errors) for handling all three shapes.
 
 ---
 
@@ -291,6 +395,7 @@ Wallets
 ├── Id (PK)
 ├── WalletNumber (Unique)
 ├── Balance (decimal 18,2)
+├── RowVersion (SQL Server concurrency token)
 ├── Currency
 ├── Status (Active/Suspended/Closed)
 ├── UserId (FK → Users)
@@ -298,9 +403,12 @@ Wallets
 
 Transactions
 ├── Id (PK)
-├── ReferenceNumber (Unique)
+├── ReferenceNumber (unique together with WalletId)
 ├── Amount (decimal 18,2)
 ├── Type (Deposit/Withdrawal/Transfer)
+├── Direction (Unknown/Outgoing/Incoming)
+├── IdempotencyKey (nullable; unique with WalletId when present)
+├── RequestHash (nullable; original request fingerprint)
 ├── Status (Pending/Completed/Failed/Reversed)
 ├── Description
 ├── WalletId (FK → Wallets)
@@ -308,9 +416,12 @@ Transactions
 └── CreatedAt
 ```
 
+Beneficiaries store `Id`, `UserId`, `Nickname`, `WalletNumber`, and `CreatedAt`.
+The pair `(UserId, WalletNumber)` is unique.
+
 ---
 
-## Project Structure
+## Project Structure (core files)
 
 ```
 DigitalWallet.Domain/
@@ -371,3 +482,47 @@ DigitalWallet.API/
 **Ali Raza Khan** — Backend Software Engineer
 
 - GitHub: [@AliYusufzai](https://github.com/AliYusufzai)
+
+
+## Money-operation safety and client retries
+
+Deposit, withdrawal, and transfer bodies now require an `idempotencyKey`
+(1-64 characters). Generate a new key per intended operation; reuse the same
+key and identical body after a timeout or retryable HTTP 409:
+
+```json
+{
+  "receiverWalletNumber": "W-12345678",
+  "amount": 50.00,
+  "description": "Lunch",
+  "idempotencyKey": "22ed59d86a184b1db73ce9a83ba0d54c"
+}
+```
+
+Keys are scoped to the initiating wallet across all three operation types.
+A completed retry returns the original transaction. Reusing a key with changed
+inputs returns HTTP 409. Concurrent balance updates also return 409 and roll
+back the operation. Retry with the same key, never a fresh one. A conflict caused
+by changed inputs requires correcting the request, not an automatic retry.
+
+Amounts must be between 1 and 1,000,000 with at most two decimal places.
+History includes `direction`: Incoming, Outgoing, or Unknown for legacy transfers.
+Both transfer entries share a GUID-based reference.
+
+Apply migrations before starting the updated API:
+
+```powershell
+dotnet ef database update --project DigitalWallet.Infrastructure --startup-project DigitalWallet.API
+```
+
+The safety migration adds wallet rowversions, directions, and a filtered unique
+idempotency index. It backfills deposit/withdrawal direction without changing
+balances. Legacy transfers remain Unknown because free-text descriptions cannot
+reliably establish direction. Replaying requests made before idempotency tracking
+was introduced cannot be detected.
+
+### Verification
+
+The current checkout does not include the previously described SQL regression
+runner. Documentation was checked against source code; endpoint examples were
+not executed against a running API.

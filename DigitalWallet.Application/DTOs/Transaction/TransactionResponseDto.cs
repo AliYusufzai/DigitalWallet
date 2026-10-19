@@ -3,6 +3,7 @@ namespace DigitalWallet.Application.DTOs.Transaction;
 public class TransactionResponseDto
 {
     public int Id { get; set; }
+    public string Direction { get; set; } = string.Empty;
     public required string ReferenceNumber { get; set; }
     public decimal Amount { get; set; }
     public required string Type { get; set; } // "Deposit", "Withdrawal", "Transfer"

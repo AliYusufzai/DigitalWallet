@@ -4,6 +4,10 @@ namespace DigitalWallet.Application.DTOs.Wallet;
 
 public class TransferDto
 {
+    [Required]
+    [StringLength(64, MinimumLength = 1)]
+    public string IdempotencyKey { get; set; } = string.Empty;
+
     [Required(ErrorMessage = "Receiver wallet number is required")]
     public required string ReceiverWalletNumber { get; set; }
 
