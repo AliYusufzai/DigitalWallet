@@ -22,6 +22,8 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
 
         builder.Property(u => u.IsActive).HasDefaultValue(true);
 
+        builder.Property(u => u.EmailVerificationTokenHash).HasMaxLength(64);
+
         builder.Property(u => u.CreatedAt).HasDefaultValueSql("GETUTCDATE()");
 
         builder.HasIndex(u => u.Email).IsUnique();

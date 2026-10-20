@@ -22,6 +22,9 @@ public static class DependencyInjection
 
         // register JWT settings
         services.Configure<JwtSettings>(configuration.GetSection("JwtSettings"));
+        services.Configure<EmailVerificationSettings>(
+            configuration.GetSection("EmailVerification")
+        );
 
         return services;
     }

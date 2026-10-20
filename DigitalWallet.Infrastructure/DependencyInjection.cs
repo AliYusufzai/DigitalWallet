@@ -1,4 +1,6 @@
 using DigitalWallet.Application.Interfaces.Repositories;
+using DigitalWallet.Application.Interfaces.Services;
+using DigitalWallet.Application.Settings;
 using DigitalWallet.Infrastructure.Persistence;
 using DigitalWallet.Infrastructure.Repositories;
 using Microsoft.EntityFrameworkCore;
@@ -18,10 +20,14 @@ public static class DependencyInjection
             options.UseSqlServer(configuration.GetConnectionString("DefaultConnection"))
         );
 
+        services.Configure<EmailSettings>(configuration.GetSection("EmailSettings"));
+
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IWalletRepository, WalletRepository>();
         services.AddScoped<ITransactionRepository, TransactionRepository>();
         services.AddScoped<IBeneficiaryRepository, BeneficiaryRepository>();
+
+        services.AddScoped<IEmailSender, SmtpEmailSender>();
 
         services.AddScoped<IUnitOfWork, UnitOfWork>();
 

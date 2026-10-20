@@ -9,5 +9,7 @@ public interface IUserRepository
     Task<bool> ExistsByEmailAsync(string email);
     Task<User> CreateAsync(User user);
     Task<User> UpdateAsync(User user);
-    // Task<User> UpdateAsync(User user);
+
+    Task<bool> TrySetVerificationTokenAsync(int userId, string tokenHash, DateTime now);
+    Task<bool> TryVerifyEmailAsync(string email, string tokenHash, DateTime now);
 }

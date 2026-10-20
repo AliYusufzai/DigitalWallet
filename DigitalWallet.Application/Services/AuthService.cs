@@ -1,5 +1,6 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
+using System.Security.Cryptography;
 using System.Text;
 using DigitalWallet.Application.DTOs.Auth;
 using DigitalWallet.Application.Interfaces.Repositories;
@@ -7,6 +8,7 @@ using DigitalWallet.Application.Interfaces.Services;
 using DigitalWallet.Application.Settings;
 using DigitalWallet.Domain.Entities;
 using DigitalWallet.Domain.Exceptions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 
@@ -16,44 +18,129 @@ public class AuthService : IAuthService
 {
     private readonly IUserRepository _userRepository;
     private readonly JwtSettings _jwtSettings;
+    private readonly IEmailSender _emailSender;
+    private readonly EmailVerificationSettings _verificationSettings;
+    private readonly ILogger<AuthService> _logger;
 
-    public AuthService(IUserRepository userRepository, IOptions<JwtSettings> jwtSettings)
+    public AuthService(
+        IUserRepository userRepository,
+        IOptions<JwtSettings> jwtSettings,
+        IEmailSender emailSender,
+        IOptions<EmailVerificationSettings> verificationSettings,
+        ILogger<AuthService> logger
+    )
     {
         _userRepository = userRepository;
         _jwtSettings = jwtSettings.Value;
+        _emailSender = emailSender;
+        _verificationSettings = verificationSettings.Value;
+        _logger = logger;
     }
 
-    public async Task<AuthResponseDto> RegisterAsync(RegisterDto dto)
+    private static string HashToken(string token)
     {
-        bool emailExists = await _userRepository.ExistsByEmailAsync(dto.Email);
-        if (emailExists)
+        byte[] tokenBytes = Encoding.UTF8.GetBytes(token);
+        byte[] hashBytes = SHA256.HashData(tokenBytes);
+
+        return Convert.ToHexString(hashBytes);
+    }
+
+    private async Task SendVerificationEmailAsync(User user)
+    {
+        string token = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
+
+        string tokenHash = HashToken(token);
+
+        bool canSend = await _userRepository.TrySetVerificationTokenAsync(
+            user.Id,
+            tokenHash,
+            DateTime.UtcNow
+        );
+
+        if (!canSend)
         {
-            throw new WalletException("An account with this email already exists");
+            return;
         }
 
-        string passwordHash = BCrypt.Net.BCrypt.HashPassword(dto.Password);
+        string frontendUrl = _verificationSettings.FrontendUrl.TrimEnd('/');
 
-        User user = new User
+        string link =
+            $"{frontendUrl}/verify-email"
+            + $"?email={Uri.EscapeDataString(user.Email)}"
+            + $"&token={Uri.EscapeDataString(token)}";
+
+        string body =
+            "Welcome to Digital Wallet!\n\n"
+            + "Open this link and confirm your email address:\n\n"
+            + link
+            + "\n\nThis link expires in one hour."
+            + "\nIf you did not request this, ignore this email.";
+
+        try
+        {
+            await _emailSender.SendAsync(user.Email, "Verify your Digital Wallet email", body);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                "Verification email delivery failed for user {UserId}. Error type: {Type}",
+                user.Id,
+                ex.GetType().Name
+            );
+        }
+    }
+
+    public async Task RegisterAsync(RegisterDto dto)
+    {
+        string email = dto.Email.Trim();
+        bool exists = await _userRepository.ExistsByEmailAsync(email);
+
+        if (exists)
+        {
+            return;
+        }
+
+        var user = new User
         {
             FullName = dto.FullName,
-            Email = dto.Email,
-            PasswordHash = passwordHash,
+            Email = email,
             PhoneNumber = dto.PhoneNumber,
+            PasswordHash = BCrypt.Net.BCrypt.HashPassword(dto.Password),
         };
 
         User createdUser = await _userRepository.CreateAsync(user);
 
-        string token = GenerateToken(createdUser);
+        await SendVerificationEmailAsync(createdUser);
+    }
 
-        // 6. return response
-        return new AuthResponseDto
+    public async Task VerifyEmailAsync(VerifyEmailDto dto)
+    {
+        string tokenHash = HashToken(dto.Token);
+
+        bool verified = await _userRepository.TryVerifyEmailAsync(
+            dto.Email.Trim(),
+            tokenHash,
+            DateTime.UtcNow
+        );
+
+        if (!verified)
         {
-            UserId = createdUser.Id,
-            FullName = createdUser.FullName,
-            Email = createdUser.Email,
-            Token = token,
-            ExpiresAt = DateTime.UtcNow.AddMinutes(_jwtSettings.ExpiryMinutes),
-        };
+            throw new WalletException(
+                "The verification link is invalid, expired, or already used."
+            );
+        }
+    }
+
+    public async Task ResendVerificationAsync(ResendVerificationDto dto)
+    {
+        User? user = await _userRepository.GetByEmailAsync(dto.Email.Trim());
+
+        if (user == null || !user.IsActive || user.EmailVerifiedAt != null)
+        {
+            return;
+        }
+
+        await SendVerificationEmailAsync(user);
     }
 
     private string GenerateToken(User user)
@@ -101,6 +188,11 @@ public class AuthService : IAuthService
         if (!user.IsActive)
         {
             throw new WalletException("Your account has been deactivated");
+        }
+
+        if (user.EmailVerifiedAt == null)
+        {
+            throw new WalletException("Please verify your email before logging in.");
         }
 
         string token = GenerateToken(user);

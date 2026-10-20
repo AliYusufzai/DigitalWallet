@@ -42,4 +42,48 @@ public class UserRepository : IUserRepository
         await _context.SaveChangesAsync();
         return user;
     }
+
+    public async Task<bool> TrySetVerificationTokenAsync(int userId, string tokenHash, DateTime now)
+    {
+        DateTime coolDown = now.AddSeconds(-60);
+        DateTime expiresAt = now.AddHours(1);
+
+        int changedRows = await _context
+            .Users.Where(user =>
+                user.Id == userId
+                && user.IsActive
+                && user.EmailVerifiedAt == null
+                && (
+                    user.EmailVerificationLastSentAt == null
+                    || user.EmailVerificationLastSentAt <= coolDown
+                )
+            )
+            .ExecuteUpdateAsync(update =>
+                update
+                    .SetProperty(user => user.EmailVerificationTokenHash, tokenHash)
+                    .SetProperty(user => user.EmailVerificationExpiresAt, (DateTime?)expiresAt)
+                    .SetProperty(user => user.EmailVerificationLastSentAt, (DateTime?)now)
+            );
+        return changedRows == 1;
+    }
+
+    public async Task<bool> TryVerifyEmailAsync(string email, string tokenHash, DateTime now)
+    {
+        int changedRows = await _context
+            .Users.Where(user =>
+                user.Email == email
+                && user.IsActive
+                && user.EmailVerifiedAt == null
+                && user.EmailVerificationTokenHash == tokenHash
+                && user.EmailVerificationExpiresAt > now
+            )
+            .ExecuteUpdateAsync(update =>
+                update
+                    .SetProperty(user => user.EmailVerifiedAt, (DateTime?)now)
+                    .SetProperty(user => user.EmailVerificationTokenHash, (string?)null)
+                    .SetProperty(user => user.EmailVerificationExpiresAt, (DateTime?)null)
+            );
+
+        return changedRows == 1;
+    }
 }
