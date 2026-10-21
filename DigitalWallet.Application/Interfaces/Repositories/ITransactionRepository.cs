@@ -11,4 +11,5 @@ public interface ITransactionRepository
     Task<List<Transaction>> GetByWalletIdAsync(int walletId, TransactionFilterDto filter);
     Task<int> GetTotalCountByWalletIdAsync(int walletId, TransactionFilterDto filter);
     Task<Transaction> CreateAsync(Transaction transaction);
+    Task<decimal> GetOutgoingTotalAsync(int walletId, DateTime startUtc, DateTime endUtc);
 }

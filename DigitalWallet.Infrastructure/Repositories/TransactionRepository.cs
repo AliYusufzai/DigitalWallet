@@ -1,6 +1,7 @@
 using DigitalWallet.Application.DTOs;
 using DigitalWallet.Application.Interfaces.Repositories;
 using DigitalWallet.Domain.Entities;
+using DigitalWallet.Domain.Enums;
 using DigitalWallet.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -75,7 +76,8 @@ public class TransactionRepository : ITransactionRepository
 
     public Task<Transaction?> GetByIdempotencyKeyAsync(int walletId, string key)
     {
-        return _context.Transactions.Include(t => t.ReceiverWallet)
+        return _context
+            .Transactions.Include(t => t.ReceiverWallet)
             .FirstOrDefaultAsync(t => t.WalletId == walletId && t.IdempotencyKey == key);
     }
 
@@ -84,5 +86,24 @@ public class TransactionRepository : ITransactionRepository
         _context.Transactions.Add(transaction);
         await _context.SaveChangesAsync();
         return transaction;
+    }
+
+    public async Task<decimal> GetOutgoingTotalAsync(
+        int walletId,
+        DateTime startUtc,
+        DateTime endUtc
+    )
+    {
+        return await _context
+                .Transactions.Where(t =>
+                    t.WalletId == walletId
+                    && t.Status == TransactionStatus.Completed
+                    && t.Direction == TransactionDirection.Outgoing
+                    && (t.Type == TransactionType.Withdrawal || t.Type == TransactionType.Transfer)
+                    && t.CreatedAt >= startUtc
+                    && t.CreatedAt < endUtc
+                )
+                .SumAsync(t => (decimal?)t.Amount)
+            ?? 0m;
     }
 }

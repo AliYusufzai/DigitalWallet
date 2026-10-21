@@ -25,6 +25,14 @@ public static class DependencyInjection
         services.Configure<EmailVerificationSettings>(
             configuration.GetSection("EmailVerification")
         );
+        services
+            .AddOptions<WalletLimitSettings>()
+            .Bind(configuration.GetSection("WalletLimits"))
+            .Validate(
+                settings => settings.DailyOutgoingLimit > 0,
+                "Daily outgoing limit must be greater than zero."
+            )
+            .ValidateOnStart();
 
         return services;
     }

@@ -2,9 +2,11 @@ using DigitalWallet.Application.DTOs.Transaction;
 using DigitalWallet.Application.DTOs.Wallet;
 using DigitalWallet.Application.Interfaces.Repositories;
 using DigitalWallet.Application.Interfaces.Services;
+using DigitalWallet.Application.Settings;
 using DigitalWallet.Domain.Entities;
 using DigitalWallet.Domain.Enums;
 using DigitalWallet.Domain.Exceptions;
+using Microsoft.Extensions.Options;
 
 namespace DigitalWallet.Application.Services;
 
@@ -13,16 +15,19 @@ public class WalletService : IWalletService
     private readonly IWalletRepository _walletRepository;
     private readonly ITransactionRepository _transactionRepository;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly WalletLimitSettings _walletLimits;
 
     public WalletService(
         IWalletRepository walletRepository,
         ITransactionRepository transactionRepository,
-        IUnitOfWork unitOfWork
+        IUnitOfWork unitOfWork,
+        IOptions<WalletLimitSettings> walletLimits
     )
     {
         _walletRepository = walletRepository;
         _transactionRepository = transactionRepository;
         _unitOfWork = unitOfWork;
+        _walletLimits = walletLimits.Value;
     }
 
     public async Task<WalletResponseDto> CreateWalletAsync(int userId)
@@ -67,21 +72,46 @@ public class WalletService : IWalletService
     }
 
     public Task<TransactionResponseDto> DepositAsync(int userId, DepositDto dto) =>
-        ExecuteAsync(userId, dto.Amount, dto.Description, dto.IdempotencyKey, TransactionType.Deposit);
+        ExecuteAsync(
+            userId,
+            dto.Amount,
+            dto.Description,
+            dto.IdempotencyKey,
+            TransactionType.Deposit
+        );
 
     public Task<TransactionResponseDto> WithdrawAsync(int userId, WithdrawDto dto) =>
-        ExecuteAsync(userId, dto.Amount, dto.Description, dto.IdempotencyKey, TransactionType.Withdrawal);
+        ExecuteAsync(
+            userId,
+            dto.Amount,
+            dto.Description,
+            dto.IdempotencyKey,
+            TransactionType.Withdrawal
+        );
 
     public Task<TransactionResponseDto> TransferAsync(int userId, TransferDto dto) =>
-        ExecuteAsync(userId, dto.Amount, dto.Description, dto.IdempotencyKey,
-            TransactionType.Transfer, dto.ReceiverWalletNumber);
+        ExecuteAsync(
+            userId,
+            dto.Amount,
+            dto.Description,
+            dto.IdempotencyKey,
+            TransactionType.Transfer,
+            dto.ReceiverWalletNumber
+        );
 
     private async Task<TransactionResponseDto> ExecuteAsync(
-        int userId, decimal amount, string? description, string key,
-        TransactionType type, string? receiverNumber = null)
+        int userId,
+        decimal amount,
+        string? description,
+        string key,
+        TransactionType type,
+        string? receiverNumber = null
+    )
     {
         if (amount < 1 || amount > 1_000_000 || decimal.Round(amount, 2) != amount)
-            throw new WalletException("Amount must be between 1 and 1,000,000 with at most two decimal places.");
+            throw new WalletException(
+                "Amount must be between 1 and 1,000,000 with at most two decimal places."
+            );
         if (string.IsNullOrWhiteSpace(key) || key.Length > 64)
             throw new WalletException("An idempotency key of 1 to 64 characters is required.");
         if (description?.Length > 200)
@@ -89,20 +119,33 @@ public class WalletService : IWalletService
         if (type == TransactionType.Transfer && string.IsNullOrWhiteSpace(receiverNumber))
             throw new WalletException("Receiver wallet number is required.");
 
-        var wallet = await _walletRepository.GetByUserIdAsync(userId)
+        var wallet =
+            await _walletRepository.GetByUserIdAsync(userId)
             ?? throw new NotFoundException(nameof(Wallet), userId);
         // Hash the original request, so reusing a key with different inputs is rejected.
-        string requestHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
-            System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new
-            {
-                Type = type, Amount = amount.ToString("G29", System.Globalization.CultureInfo.InvariantCulture),
-                Description = description, Receiver = receiverNumber
-            })));
+        string requestHash = Convert.ToHexString(
+            System.Security.Cryptography.SHA256.HashData(
+                System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(
+                    new
+                    {
+                        Type = type,
+                        Amount = amount.ToString(
+                            "G29",
+                            System.Globalization.CultureInfo.InvariantCulture
+                        ),
+                        Description = description,
+                        Receiver = receiverNumber,
+                    }
+                )
+            )
+        );
         var existing = await _transactionRepository.GetByIdempotencyKeyAsync(wallet.Id, key);
         if (existing != null)
         {
             if (existing.RequestHash != requestHash)
-                throw new ConflictException("This idempotency key was already used for a different request.");
+                throw new ConflictException(
+                    "This idempotency key was already used for a different request."
+                );
             return MapToTransactionDto(existing, existing.ReceiverWallet?.WalletNumber);
         }
 
@@ -111,7 +154,8 @@ public class WalletService : IWalletService
         Wallet? receiver = null;
         if (type == TransactionType.Transfer)
         {
-            receiver = await _walletRepository.GetByWalletNumberAsync(receiverNumber!)
+            receiver =
+                await _walletRepository.GetByWalletNumberAsync(receiverNumber!)
                 ?? throw new NotFoundException(nameof(Wallet), receiverNumber!);
             if (receiver.Id == wallet.Id)
                 throw new WalletException("Cannot transfer to your own wallet.");
@@ -126,6 +170,25 @@ public class WalletService : IWalletService
         await _unitOfWork.BeginTransactionAsync();
         try
         {
+            var operationTimeUtc = DateTime.UtcNow;
+            if (type == TransactionType.Withdrawal || type == TransactionType.Transfer)
+            {
+                var dayRange = GetPakistanDayUtcRange(operationTimeUtc);
+
+                decimal spentToday = await _transactionRepository.GetOutgoingTotalAsync(
+                    wallet.Id,
+                    dayRange.StartUtc,
+                    dayRange.EndUtc
+                );
+
+                decimal dailyLimit = _walletLimits.DailyOutgoingLimit;
+                if (spentToday + amount > dailyLimit)
+                {
+                    throw new WalletException(
+                        $"Daily outgoing limit of PKR {dailyLimit:N2} exceeded."
+                    );
+                }
+            }
             wallet.Balance += type == TransactionType.Deposit ? amount : -amount;
             await _walletRepository.UpdateAsync(wallet);
             if (receiver != null)
@@ -140,28 +203,37 @@ public class WalletService : IWalletService
                 ReceiverWalletId = receiver?.Id,
                 Amount = amount,
                 Type = type,
-                Direction = type == TransactionType.Deposit
-                    ? TransactionDirection.Incoming : TransactionDirection.Outgoing,
+                Direction =
+                    type == TransactionType.Deposit
+                        ? TransactionDirection.Incoming
+                        : TransactionDirection.Outgoing,
                 Status = TransactionStatus.Completed,
-                Description = description ?? (receiver != null
-                    ? $"Transfer to {receiver.WalletNumber}" : type.ToString()),
+                Description =
+                    description
+                    ?? (
+                        receiver != null ? $"Transfer to {receiver.WalletNumber}" : type.ToString()
+                    ),
                 IdempotencyKey = key,
-                RequestHash = requestHash
+                RequestHash = requestHash,
+                CreatedAt = operationTimeUtc,
             };
             await _transactionRepository.CreateAsync(transaction);
             if (receiver != null)
             {
-                await _transactionRepository.CreateAsync(new Transaction
-                {
-                    ReferenceNumber = transaction.ReferenceNumber,
-                    WalletId = receiver.Id,
-                    ReceiverWalletId = wallet.Id,
-                    Amount = amount,
-                    Type = TransactionType.Transfer,
-                    Direction = TransactionDirection.Incoming,
-                    Status = TransactionStatus.Completed,
-                    Description = $"Transfer from {wallet.WalletNumber}"
-                });
+                await _transactionRepository.CreateAsync(
+                    new Transaction
+                    {
+                        ReferenceNumber = transaction.ReferenceNumber,
+                        WalletId = receiver.Id,
+                        ReceiverWalletId = wallet.Id,
+                        Amount = amount,
+                        Type = TransactionType.Transfer,
+                        Direction = TransactionDirection.Incoming,
+                        Status = TransactionStatus.Completed,
+                        Description = $"Transfer from {wallet.WalletNumber}",
+                        CreatedAt = operationTimeUtc,
+                    }
+                );
             }
             await _unitOfWork.CommitAsync();
             return MapToTransactionDto(transaction, receiver?.WalletNumber);
@@ -171,6 +243,22 @@ public class WalletService : IWalletService
             await _unitOfWork.RollbackAsync();
             throw;
         }
+    }
+
+    private static (DateTime StartUtc, DateTime EndUtc) GetPakistanDayUtcRange(DateTime utcNow)
+    {
+        var pakistanTimeZone = TimeZoneInfo.FindSystemTimeZoneById("Pakistan Standard Time");
+
+        var pakistanNow = TimeZoneInfo.ConvertTimeFromUtc(utcNow, pakistanTimeZone);
+
+        var startLocal = DateTime.SpecifyKind(pakistanNow.Date, DateTimeKind.Unspecified);
+
+        var endLocal = startLocal.AddDays(1);
+
+        return (
+            TimeZoneInfo.ConvertTimeToUtc(startLocal, pakistanTimeZone),
+            TimeZoneInfo.ConvertTimeToUtc(endLocal, pakistanTimeZone)
+        );
     }
 
     private static string GenerateWalletNumber()
