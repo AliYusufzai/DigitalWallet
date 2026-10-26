@@ -1,6 +1,8 @@
 using System.Text;
+using DigitalWallet.API.Identities;
 using DigitalWallet.API.Middleware;
 using DigitalWallet.Application;
+using DigitalWallet.Application.Interfaces.Services;
 using DigitalWallet.Application.Settings;
 using DigitalWallet.Infrastructure;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -57,6 +59,9 @@ builder.Services.AddCors(options =>
         }
     );
 });
+
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<ICurrentUser, CurrentUser>();
 
 // -----------------------------------------------
 // BUILD THE APP

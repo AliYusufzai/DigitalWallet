@@ -1,6 +1,7 @@
 using DigitalWallet.Application.Interfaces.Repositories;
 using DigitalWallet.Application.Interfaces.Services;
 using DigitalWallet.Application.Settings;
+using DigitalWallet.Infrastructure.Interceptors;
 using DigitalWallet.Infrastructure.Persistence;
 using DigitalWallet.Infrastructure.Repositories;
 using Microsoft.EntityFrameworkCore;
@@ -16,8 +17,13 @@ public static class DependencyInjection
         IConfiguration configuration
     )
     {
-        services.AddDbContext<AppDbContext>(options =>
-            options.UseSqlServer(configuration.GetConnectionString("DefaultConnection"))
+        services.AddScoped<AuditLogInterceptor>();
+        services.AddDbContext<AppDbContext>(
+            (serviceProvider, options) =>
+            {
+                options.UseSqlServer(configuration.GetConnectionString("DefaultConnection"));
+                options.AddInterceptors(serviceProvider.GetRequiredService<AuditLogInterceptor>());
+            }
         );
 
         services.Configure<EmailSettings>(configuration.GetSection("EmailSettings"));

@@ -13,6 +13,7 @@ public class AppDbContext : DbContext
     public DbSet<Wallet> Wallets => Set<Wallet>();
     public DbSet<Transaction> Transactions => Set<Transaction>();
     public DbSet<Beneficiary> Beneficiaries => Set<Beneficiary>();
+    public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
