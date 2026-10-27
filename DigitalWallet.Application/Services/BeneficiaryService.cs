@@ -10,14 +10,20 @@ public class BeneficiaryService : IBeneficiaryService
 {
     private readonly IBeneficiaryRepository _beneficiaryRepository;
     private readonly IWalletRepository _walletRepository;
+    private readonly IUnitOfWork _unitOfWork;
+    private readonly IAuditWriter _auditWriter;
 
     public BeneficiaryService(
         IBeneficiaryRepository beneficiaryRepository,
-        IWalletRepository walletRepository
+        IWalletRepository walletRepository,
+        IUnitOfWork unitOfWork,
+        IAuditWriter auditWriter
     )
     {
         _beneficiaryRepository = beneficiaryRepository;
         _walletRepository = walletRepository;
+        _unitOfWork = unitOfWork;
+        _auditWriter = auditWriter;
     }
 
     public async Task<List<BeneficiaryResponseDto>> GetAllAsync(int userId)
@@ -54,9 +60,19 @@ public class BeneficiaryService : IBeneficiaryService
             UserId = userId,
         };
 
-        Beneficiary created = await _beneficiaryRepository.AddAsync(beneficiary);
-
-        return MapToDto(created);
+        await _unitOfWork.BeginTransactionAsync();
+        try
+        {
+            Beneficiary created = await _beneficiaryRepository.AddAsync(beneficiary);
+            await _auditWriter.WriteBeneficiaryCreatedAsync(created);
+            await _unitOfWork.CommitAsync();
+            return MapToDto(created);
+        }
+        catch
+        {
+            await _unitOfWork.RollbackAsync();
+            throw;
+        }
     }
 
     public async Task DeleteAsync(int userId, int beneficiaryId)

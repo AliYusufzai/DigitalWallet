@@ -34,6 +34,7 @@ public static class DependencyInjection
         services.AddScoped<IBeneficiaryRepository, BeneficiaryRepository>();
 
         services.AddScoped<IEmailSender, SmtpEmailSender>();
+        services.AddScoped<IAuditWriter, AuditWriter>();
 
         services.AddScoped<IUnitOfWork, UnitOfWork>();
 

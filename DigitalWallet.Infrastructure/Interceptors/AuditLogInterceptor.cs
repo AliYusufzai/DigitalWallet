@@ -45,23 +45,69 @@ public class AuditLogInterceptor : SaveChangesInterceptor
 
         context.ChangeTracker.DetectChanges();
 
-        var walletEntries = context
-            .ChangeTracker.Entries<Wallet>()
-            .Where(entry => entry.State == EntityState.Modified)
+        var entries = context
+            .ChangeTracker.Entries()
+            .Where(entry =>
+                (
+                    entry.State == EntityState.Modified
+                    && (entry.Entity is Wallet || entry.Entity is User)
+                ) || (entry.State == EntityState.Deleted && entry.Entity is Beneficiary)
+            )
             .ToList();
 
         var timestamp = DateTime.UtcNow;
 
-        foreach (var entry in walletEntries)
+        foreach (var entry in entries)
         {
+            string entityName;
+            string entityId;
+            string[] auditedProperties;
+
+            if (entry.Entity is Wallet wallet)
+            {
+                entityName = nameof(Wallet);
+                entityId = wallet.Id.ToString();
+
+                auditedProperties = new[] { nameof(Wallet.Balance), nameof(Wallet.Status) };
+            }
+            else if (entry.Entity is User user)
+            {
+                entityName = nameof(User);
+                entityId = user.Id.ToString();
+
+                auditedProperties = new[] { nameof(User.FullName), nameof(User.PhoneNumber) };
+            }
+            else if (entry.Entity is Beneficiary beneficiary)
+            {
+                entityName = nameof(Beneficiary);
+                entityId = beneficiary.Id.ToString();
+
+                auditedProperties = new[]
+                {
+                    nameof(Beneficiary.Nickname),
+                    nameof(Beneficiary.WalletNumber),
+                    nameof(Beneficiary.UserId),
+                };
+            }
+            else
+            {
+                continue;
+            }
+
+            bool isDeleted = entry.State == EntityState.Deleted;
+
             var oldValues = new Dictionary<string, object?>();
             var newValues = new Dictionary<string, object?>();
-
-            string[] auditedProperties = { nameof(Wallet.Balance), nameof(Wallet.Status) };
 
             foreach (string propertyName in auditedProperties)
             {
                 var property = entry.Property(propertyName);
+
+                if (isDeleted)
+                {
+                    oldValues[propertyName] = property.OriginalValue;
+                    continue;
+                }
 
                 if (!property.IsModified || Equals(property.OriginalValue, property.CurrentValue))
                 {
@@ -71,7 +117,7 @@ public class AuditLogInterceptor : SaveChangesInterceptor
                 oldValues[propertyName] = property.OriginalValue;
                 newValues[propertyName] = property.CurrentValue;
             }
-            if (newValues.Count == 0)
+            if (!isDeleted && newValues.Count == 0)
             {
                 continue;
             }
@@ -79,11 +125,11 @@ public class AuditLogInterceptor : SaveChangesInterceptor
             var auditLog = new AuditLog
             {
                 ActorUserId = _currentUser.UserId,
-                EntityName = nameof(Wallet),
-                EntityId = entry.Entity.Id.ToString(),
-                Action = "Updated",
+                EntityName = entityName,
+                EntityId = entityId,
+                Action = isDeleted ? "Deleted" : "Updated",
                 OldValues = JsonSerializer.Serialize(oldValues),
-                NewValues = JsonSerializer.Serialize(newValues),
+                NewValues = isDeleted ? null : JsonSerializer.Serialize(newValues),
                 CreatedAtUtc = timestamp,
             };
 
