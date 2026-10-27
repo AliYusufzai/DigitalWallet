@@ -12,6 +12,32 @@ namespace DigitalWallet.API.Controllers;
 [Authorize]
 public class ReportController : ControllerBase
 {
+    [HttpGet("daily-volume")]
+    public async Task<ActionResult<ApiResponse<List<DailyVolumeDto>>>> GetDailyVolume(
+        [FromQuery, Required] DateOnly? from,
+        [FromQuery, Required] DateOnly? to,
+        CancellationToken cancellationToken)
+    {
+        if (_currentUser.UserId is not int userId)
+            return Unauthorized();
+        var report = await _reportService.GetDailyVolumeAsync(
+            userId, from!.Value, to!.Value, cancellationToken);
+        return Ok(ApiResponse<List<DailyVolumeDto>>.Ok(report));
+    }
+
+    [HttpGet("monthly-statement")]
+    public async Task<ActionResult<ApiResponse<MonthlyStatementDto>>> GetMonthlyStatement(
+        [FromQuery, Required] int? year,
+        [FromQuery, Required] int? month,
+        CancellationToken cancellationToken)
+    {
+        if (_currentUser.UserId is not int userId)
+            return Unauthorized();
+        var report = await _reportService.GetMonthlyStatementAsync(
+            userId, year!.Value, month!.Value, cancellationToken);
+        return Ok(ApiResponse<MonthlyStatementDto>.Ok(report));
+    }
+
     private readonly IReportService _reportService;
     private readonly ICurrentUser _currentUser;
 
