@@ -38,6 +38,8 @@ public static class DependencyInjection
 
         services.AddScoped<IUnitOfWork, UnitOfWork>();
 
+        services.AddScoped<IReportRepository, ReportRepository>();
+
         return services;
     }
 }
