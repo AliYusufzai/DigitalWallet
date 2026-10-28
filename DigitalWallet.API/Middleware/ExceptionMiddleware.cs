@@ -1,6 +1,9 @@
+using System.Globalization;
 using System.Text.Json;
 using DigitalWallet.Common.Wrappers;
 using DigitalWallet.Domain.Exceptions;
+using Microsoft.Data.SqlClient;
+using Microsoft.EntityFrameworkCore;
 
 namespace DigitalWallet.API.Middleware;
 
@@ -21,53 +24,60 @@ public class ExceptionMiddleware
         {
             await _next(context);
         }
-        catch (Exception ex) when (ex is ConflictException
-            || ex is Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException
-            || ex is Microsoft.EntityFrameworkCore.DbUpdateException
-            { InnerException: Microsoft.Data.SqlClient.SqlException { Number: 2601 or 2627 } })
+        catch (Exception ex) when (IsConflict(ex))
         {
-            context.Response.StatusCode = 409;
-            context.Response.ContentType = "application/json";
-            string message = ex is ConflictException ? ex.Message
-                : "The operation conflicted with another request. Retry with the same idempotency key.";
-            await context.Response.WriteAsync(
-                JsonSerializer.Serialize(ApiResponse<object>.Fail(message)));
+            var message =
+                ex is ConflictException
+                    ? ex.Message
+                    : "The operation conflicted with another request. Retry with the same idempotency key.";
+            await WriteErrorAsync(context, StatusCodes.Status409Conflict, message);
+        }
+        catch (TooManyRequestsException ex)
+        {
+            context.Response.Headers.RetryAfter = ex.RetryAfterSeconds.ToString(
+                CultureInfo.InvariantCulture
+            );
+            await WriteErrorAsync(context, StatusCodes.Status429TooManyRequests, ex.Message);
+        }
+        catch (EmailDeliveryException ex)
+        {
+            _logger.LogError(ex, "Email delivery could not be confirmed");
+            await WriteErrorAsync(context, StatusCodes.Status503ServiceUnavailable, ex.Message);
         }
         catch (NotFoundException ex)
         {
-            _logger.LogWarning(ex.Message);
-            context.Response.StatusCode = 404;
-            context.Response.ContentType = "application/json";
-            await context.Response.WriteAsync(
-                JsonSerializer.Serialize(ApiResponse<object>.Fail(ex.Message))
-            );
+            _logger.LogWarning(ex, "Not found: {Message}", ex.Message);
+            await WriteErrorAsync(context, StatusCodes.Status404NotFound, ex.Message);
         }
         catch (InsufficientFundsException ex)
         {
-            _logger.LogWarning(ex.Message);
-            context.Response.StatusCode = 422;
-            context.Response.ContentType = "application/json";
-            await context.Response.WriteAsync(
-                JsonSerializer.Serialize(ApiResponse<object>.Fail(ex.Message))
-            );
+            _logger.LogWarning(ex, "Insufficient funds: {Message}", ex.Message);
+            await WriteErrorAsync(context, StatusCodes.Status422UnprocessableEntity, ex.Message);
         }
         catch (WalletException ex)
         {
-            _logger.LogWarning(ex.Message);
-            context.Response.StatusCode = 400;
-            context.Response.ContentType = "application/json";
-            await context.Response.WriteAsync(
-                JsonSerializer.Serialize(ApiResponse<object>.Fail(ex.Message))
-            );
+            _logger.LogWarning(ex, "Wallet error: {Message}", ex.Message);
+            await WriteErrorAsync(context, StatusCodes.Status400BadRequest, ex.Message);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Unhandled exception");
-            context.Response.StatusCode = 500;
-            context.Response.ContentType = "application/json";
-            await context.Response.WriteAsync(
-                JsonSerializer.Serialize(ApiResponse<object>.Fail("An unexpected error occurred"))
+            await WriteErrorAsync(
+                context,
+                StatusCodes.Status500InternalServerError,
+                "An unexpected error occurred"
             );
         }
     }
+
+    private static Task WriteErrorAsync(HttpContext context, int statusCode, string message)
+    {
+        context.Response.StatusCode = statusCode;
+        return context.Response.WriteAsJsonAsync(ApiResponse<object>.Fail(message));
+    }
+
+    private static bool IsConflict(Exception ex) =>
+        ex is ConflictException
+        || ex is DbUpdateConcurrencyException
+        || ex is DbUpdateException { InnerException: SqlException { Number: 2601 or 2627 } };
 }

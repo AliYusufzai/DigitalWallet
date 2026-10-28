@@ -55,7 +55,8 @@ builder.Services.AddCors(options =>
             policy
                 .WithOrigins("http://localhost:8081", "http://localhost:8080")
                 .AllowAnyHeader()
-                .AllowAnyMethod();
+                .AllowAnyMethod()
+                .WithExposedHeaders("Retry-After");
         }
     );
 });

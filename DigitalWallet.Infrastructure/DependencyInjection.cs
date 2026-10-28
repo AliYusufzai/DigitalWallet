@@ -40,6 +40,8 @@ public static class DependencyInjection
 
         services.AddScoped<IReportRepository, ReportRepository>();
 
+        services.AddScoped<ITransferConfirmationRepository, TransferConfirmationRepository>();
+
         return services;
     }
 }

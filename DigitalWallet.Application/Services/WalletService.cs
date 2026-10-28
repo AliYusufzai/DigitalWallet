@@ -89,14 +89,17 @@ public class WalletService : IWalletService
             TransactionType.Withdrawal
         );
 
-    public Task<TransactionResponseDto> TransferAsync(int userId, TransferDto dto) =>
+    // Only the confirmation service calls this, within its existing transaction.
+    internal Task<TransactionResponseDto> TransferConfirmedAsync(
+        TransferConfirmation confirmation, string receiverWalletNumber) =>
         ExecuteAsync(
-            userId,
-            dto.Amount,
-            dto.Description,
-            dto.IdempotencyKey,
+            confirmation.UserId,
+            confirmation.Amount,
+            confirmation.Description,
+            confirmation.IdempotencyKey,
             TransactionType.Transfer,
-            dto.ReceiverWalletNumber
+            receiverWalletNumber,
+            ownsTransaction: false
         );
 
     private async Task<TransactionResponseDto> ExecuteAsync(
@@ -105,7 +108,8 @@ public class WalletService : IWalletService
         string? description,
         string key,
         TransactionType type,
-        string? receiverNumber = null
+        string? receiverNumber = null,
+        bool ownsTransaction = true
     )
     {
         if (amount < 1 || amount > 1_000_000 || decimal.Round(amount, 2) != amount)
@@ -167,7 +171,8 @@ public class WalletService : IWalletService
         if (type != TransactionType.Deposit && amount > wallet.Balance)
             throw new InsufficientFundsException(wallet.Balance, amount);
 
-        await _unitOfWork.BeginTransactionAsync();
+        if (ownsTransaction)
+            await _unitOfWork.BeginTransactionAsync();
         try
         {
             var operationTimeUtc = DateTime.UtcNow;
@@ -235,12 +240,14 @@ public class WalletService : IWalletService
                     }
                 );
             }
-            await _unitOfWork.CommitAsync();
+            if (ownsTransaction)
+                await _unitOfWork.CommitAsync();
             return MapToTransactionDto(transaction, receiver?.WalletNumber);
         }
         catch
         {
-            await _unitOfWork.RollbackAsync();
+            if (ownsTransaction)
+                await _unitOfWork.RollbackAsync();
             throw;
         }
     }
@@ -284,7 +291,7 @@ public class WalletService : IWalletService
         };
     }
 
-    private static TransactionResponseDto MapToTransactionDto(
+    internal static TransactionResponseDto MapToTransactionDto(
         Transaction transaction,
         string? receiverWalletNumber = null
     )

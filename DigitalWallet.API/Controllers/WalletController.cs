@@ -14,10 +14,12 @@ namespace DigitalWallet.API.Controllers;
 public class WalletController : ControllerBase
 {
     private readonly IWalletService _walletService;
+    private readonly ITransferConfirmationService _confirmationService;
 
-    public WalletController(IWalletService walletService)
+    public WalletController(IWalletService walletService, ITransferConfirmationService confirmationService)
     {
         _walletService = walletService;
+        _confirmationService = confirmationService;
     }
 
     private int GetUserId()
@@ -73,12 +75,29 @@ public class WalletController : ControllerBase
 
     // POST api/wallet/transfer
     [HttpPost("transfer")]
-    public async Task<ActionResult<ApiResponse<TransactionResponseDto>>> Transfer(
-        [FromBody] TransferDto dto
+    public async Task<ActionResult<ApiResponse<TransferConfirmationResponseDto>>> Transfer(
+        [FromBody] TransferDto dto,
+        CancellationToken cancellationToken
     )
     {
         int userId = GetUserId();
-        TransactionResponseDto result = await _walletService.TransferAsync(userId, dto);
+        var result = await _confirmationService.RequestAsync(userId, dto, cancellationToken);
+        return Ok(ApiResponse<TransferConfirmationResponseDto>.Ok(result, "Confirmation request retrieved"));
+    }
+
+    [HttpPost("transfer/confirm")]
+    public async Task<ActionResult<ApiResponse<TransactionResponseDto>>> ConfirmTransfer(
+        [FromBody] ConfirmTransferDto dto, CancellationToken cancellationToken)
+    {
+        var result = await _confirmationService.ConfirmAsync(GetUserId(), dto, cancellationToken);
         return Ok(ApiResponse<TransactionResponseDto>.Ok(result, "Transfer successful"));
+    }
+
+    [HttpPost("transfer/confirmations/{confirmationId:int:min(1)}/resend")]
+    public async Task<ActionResult<ApiResponse<TransferConfirmationResponseDto>>> ResendTransferCode(
+        int confirmationId, CancellationToken cancellationToken)
+    {
+        var result = await _confirmationService.ResendAsync(GetUserId(), confirmationId, cancellationToken);
+        return Ok(ApiResponse<TransferConfirmationResponseDto>.Ok(result, "New confirmation code sent"));
     }
 }

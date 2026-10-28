@@ -15,7 +15,9 @@ public static class DependencyInjection
     {
         // register services
         services.AddScoped<IAuthService, AuthService>();
-        services.AddScoped<IWalletService, WalletService>();
+        services.AddScoped<WalletService>();
+        services.AddScoped<IWalletService>(provider => provider.GetRequiredService<WalletService>());
+        services.AddScoped<ITransferConfirmationService, TransferConfirmationService>();
         services.AddScoped<ITransactionService, TransactionService>();
         services.AddScoped<IUserService, UserService>();
         services.AddScoped<IBeneficiaryService, BeneficiaryService>();
@@ -35,6 +37,18 @@ public static class DependencyInjection
             )
             .ValidateOnStart();
 
+        services
+            .AddOptions<TransferConfirmationSettings>()
+            .Bind(configuration.GetSection("TransferConfirmation"))
+            .Validate(
+                settings =>
+                    settings.ExpirySeconds > 0
+                    && settings.MaxAttempts > 0
+                    && settings.ResendCooldownSeconds > 0
+                    && settings.ResendCooldownSeconds < settings.ExpirySeconds,
+                "Transfer confirmation settings are invalid."
+            )
+            .ValidateOnStart();
         return services;
     }
 }

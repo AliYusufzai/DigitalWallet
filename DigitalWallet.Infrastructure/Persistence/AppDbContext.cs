@@ -14,6 +14,7 @@ public class AppDbContext : DbContext
     public DbSet<Transaction> Transactions => Set<Transaction>();
     public DbSet<Beneficiary> Beneficiaries => Set<Beneficiary>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
+    public DbSet<TransferConfirmation> TransferConfirmations => Set<TransferConfirmation>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
